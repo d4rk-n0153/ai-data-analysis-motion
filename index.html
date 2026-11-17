@@ -2374,6 +2374,7 @@ svg{display:block}
 
   function unlockMusic(e) {
     if (e && e.target && e.target.closest && e.target.closest('#musicBtn')) return;
+    if (e && e.type === 'keydown' && (e.key === 'm' || e.key === 'M')) return;
     if (music.enabled) {
       ensureMusic();
       toastEl.classList.remove('show');
