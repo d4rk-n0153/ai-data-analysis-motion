@@ -2128,7 +2128,7 @@ svg{display:block}
     scheduler: null,
     nextTime: 0,
     chord: 0,
-    volume: 0.20
+    volume: 0.60
   };
 
   const MUSIC_BPM = 66;
@@ -2440,6 +2440,7 @@ svg{display:block}
       enabled: music.enabled,
       scheduled: !!music.scheduler,
       gain: music.master ? music.master.gain.value : 0,
+      volume: music.volume,
       chord: music.chord
     })
   };
