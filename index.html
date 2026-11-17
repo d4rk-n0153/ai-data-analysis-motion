@@ -680,8 +680,12 @@ svg{display:block}
 .ctrl-chapter span:first-child{color:var(--amber);font-size:12px}
 .ctrl-chapter span:last-child{overflow:hidden;text-overflow:ellipsis}
 .ctrl-text{font-size:12px}
-#notesBtn{width:auto;padding:0 9px;gap:6px;border-radius:999px;font-size:12px;display:flex}
-#notesBtn svg{width:15px;height:15px}
+#notesBtn,#musicBtn{width:auto;padding:0 9px;gap:6px;border-radius:999px;font-size:12px;display:flex}
+#notesBtn svg,#musicBtn svg{width:15px;height:15px}
+#musicBtn .icon-sound-off{display:none}
+#musicBtn.is-muted .icon-sound-on{display:none}
+#musicBtn.is-muted .icon-sound-off{display:block}
+#musicBtn.is-muted{color:#6f879f}
 
 .rail{position:absolute;left:0;right:0;bottom:10px;height:26px;z-index:17;cursor:pointer;direction:ltr}
 .rail-track{position:absolute;left:76px;right:76px;top:15px;height:2px;background:rgba(126,168,209,.19);overflow:hidden}
@@ -1437,6 +1441,11 @@ svg{display:block}
       <div class="ctrl-chapter"><span class="num" id="ctrlChapter">۰۱</span><span id="ctrlTitle">داده، تصمیم، هوش مصنوعی</span></div>
       <span class="ctrl-sep"></span>
       <button class="ctrl" id="notesBtn" type="button" aria-label="متن ارائه" title="متن ارائه (N)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h6"/></svg><span class="ctrl-text">متن ارائه</span></button>
+      <button class="ctrl" id="musicBtn" type="button" aria-label="خاموش کردن موسیقی" aria-pressed="true" title="موسیقی (M)">
+        <svg class="icon-sound-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h3l4-3v12l-4-3H4z"/><path d="M15 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8 8 0 0 1 0 12"/></svg>
+        <svg class="icon-sound-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h3l4-3v12l-4-3H4z"/><path d="M16 9l5 6M21 9l-5 6"/></svg>
+        <span class="ctrl-text">موسیقی</span>
+      </button>
       <button class="ctrl" id="fsBtn" type="button" aria-label="تمام‌صفحه" title="تمام‌صفحه (F)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     </div>
 
@@ -1474,6 +1483,7 @@ svg{display:block}
   const notesList = document.getElementById('notesList');
   const notesBtn = document.getElementById('notesBtn');
   const notesClose = document.getElementById('notesClose');
+  const musicBtn = document.getElementById('musicBtn');
   const controls = document.getElementById('controls');
   const playBtn = document.getElementById('playBtn');
   const fsBtn = document.getElementById('fsBtn');
@@ -1795,6 +1805,7 @@ svg{display:block}
       state.last = performance.now();
       if (!opts.silent) wake();
     }
+    syncMusic();
   }
 
   function animate(now) {
@@ -1831,6 +1842,7 @@ svg{display:block}
 
   function play() {
     if (state.t >= DURATION - 0.05) state.t = 0;
+    ensureMusic();
     setPaused(false);
     state.last = performance.now();
   }
@@ -1855,6 +1867,7 @@ svg{display:block}
   playBtn.addEventListener('click', toggle);
   notesBtn.addEventListener('click', () => toggleNotes());
   notesClose.addEventListener('click', () => toggleNotes(false));
+  musicBtn.addEventListener('click', toggleMusic);
   fsBtn.addEventListener('click', toggleFullscreen);
 
   function toggleNotes(force) {
@@ -1945,6 +1958,8 @@ svg{display:block}
       seek(i * SCENE_LEN);
     } else if (e.key === 'n' || e.key === 'N') {
       toggleNotes();
+    } else if (e.key === 'm' || e.key === 'M') {
+      toggleMusic();
     } else if (e.key === 'f' || e.key === 'F') {
       toggleFullscreen();
     } else if (e.key === 'r' || e.key === 'R') {
@@ -2103,6 +2118,270 @@ svg{display:block}
     ctx.restore();
   }
 
+  /* ---------- ambient music (generated with Web Audio, no external asset) ---------- */
+  const music = {
+    ctx: null,
+    master: null,
+    bus: null,
+    enabled: true,
+    scheduler: null,
+    nextTime: 0,
+    chord: 0,
+    volume: 0.20
+  };
+
+  const MUSIC_BPM = 66;
+  const MUSIC_BEAT = 60 / MUSIC_BPM;
+  const MUSIC_CHORD_BEATS = 8;
+  const MUSIC_CHORD_DUR = MUSIC_BEAT * MUSIC_CHORD_BEATS;
+  const MUSIC_CHORDS = [
+    { bass: 73.42,  notes: [146.83, 220.00, 277.18, 329.63, 369.99] }, // Dmaj9
+    { bass: 55.00,  notes: [110.00, 164.81, 220.00, 246.94, 329.63] }, // Aadd9
+    { bass: 61.74,  notes: [123.47, 185.00, 220.00, 293.66, 369.99] }, // Bm7
+    { bass: 49.00,  notes: [98.00, 146.83, 185.00, 220.00, 246.94] },  // Gmaj7
+    { bass: 73.42,  notes: [146.83, 220.00, 277.18, 329.63, 369.99] }, // Dmaj9
+    { bass: 92.50,  notes: [185.00, 220.00, 277.18, 329.63, 369.99] }, // F#m7
+    { bass: 49.00,  notes: [98.00, 146.83, 185.00, 220.00, 246.94] },  // Gmaj7
+    { bass: 55.00,  notes: [110.00, 164.81, 220.00, 246.94, 329.63] }  // Aadd9
+  ];
+
+  function makeImpulse(ctx, seconds = 3.4, decay = 2.6) {
+    const len = Math.floor(ctx.sampleRate * seconds);
+    const buf = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = buf.getChannelData(ch);
+      let smooth = 0;
+      for (let i = 0; i < len; i++) {
+        const n = Math.random() * 2 - 1;
+        smooth = smooth * 0.72 + n * 0.28;
+        data[i] = smooth * Math.pow(1 - i / len, decay) * 0.8;
+      }
+    }
+    return buf;
+  }
+
+  function ensureMusic() {
+    if (!music.enabled) return;
+    if (music.ctx) {
+      if (music.ctx.state === 'suspended' || music.ctx.state === 'interrupted') {
+        music.ctx.resume().then(() => syncMusic()).catch(() => {});
+      }
+      return;
+    }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) {
+      musicBtn.style.display = 'none';
+      return;
+    }
+    let ctx;
+    try { ctx = new AC(); } catch (e) {
+      musicBtn.style.display = 'none';
+      return;
+    }
+    music.ctx = ctx;
+
+    const master = ctx.createGain();
+    master.gain.value = 0;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -22;
+    comp.knee.value = 18;
+    comp.ratio.value = 3;
+    comp.attack.value = 0.01;
+    comp.release.value = 0.3;
+    master.connect(comp);
+    comp.connect(ctx.destination);
+
+    const dry = ctx.createGain();
+    dry.gain.value = 0.86;
+    dry.connect(master);
+
+    const conv = ctx.createConvolver();
+    conv.buffer = makeImpulse(ctx);
+    const wet = ctx.createGain();
+    wet.gain.value = 0.36;
+    conv.connect(wet);
+    wet.connect(master);
+
+    const bus = ctx.createGain();
+    bus.gain.value = 0.8;
+    const padFilter = ctx.createBiquadFilter();
+    padFilter.type = 'lowpass';
+    padFilter.frequency.value = 1150;
+    padFilter.Q.value = 0.35;
+    const padGain = ctx.createGain();
+    padGain.gain.value = 0.8;
+    bus.connect(padFilter);
+    padFilter.connect(padGain);
+    padGain.connect(dry);
+    padGain.connect(conv);
+
+    const lfo = ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = 0.035;
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = 320;
+    lfo.connect(lfoGain);
+    lfoGain.connect(padFilter.frequency);
+    lfo.start();
+
+    music.master = master;
+    music.bus = bus;
+
+    const start = () => {
+      if (music.ctx.state === 'running') {
+        startMusicScheduler();
+        syncMusic();
+      }
+    };
+    if (ctx.state === 'suspended') {
+      ctx.resume().then(start).catch(() => {});
+    } else {
+      start();
+    }
+  }
+
+  function startMusicScheduler() {
+    if (!music.ctx || music.scheduler) return;
+    music.nextTime = music.ctx.currentTime + 0.15;
+    music.chord = 0;
+    scheduleMusic();
+    music.scheduler = setInterval(scheduleMusic, 250);
+  }
+
+  function scheduleMusic() {
+    const ctx = music.ctx;
+    if (!ctx) return;
+    if (music.nextTime < ctx.currentTime - 2) {
+      music.nextTime = ctx.currentTime + 0.1;
+    }
+    while (music.nextTime < ctx.currentTime + 1.2) {
+      scheduleChord(music.nextTime, MUSIC_CHORDS[music.chord], music.chord);
+      music.nextTime += MUSIC_CHORD_DUR;
+      music.chord = (music.chord + 1) % MUSIC_CHORDS.length;
+    }
+  }
+
+  function scheduleChord(t, chord, index) {
+    const ctx = music.ctx;
+    if (!ctx) return;
+    const end = t + MUSIC_CHORD_DUR;
+
+    const pad = ctx.createGain();
+    pad.gain.setValueAtTime(0, t);
+    pad.gain.linearRampToValueAtTime(0.052, t + 3.0);
+    pad.gain.setValueAtTime(0.052, end - 1.0);
+    pad.gain.linearRampToValueAtTime(0.0001, end + 2.1);
+    pad.connect(music.bus);
+
+    chord.notes.forEach((freq, i) => {
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = (i % 2 ? -1 : 1) * (0.16 + i * 0.035);
+      const noteGain = ctx.createGain();
+      noteGain.gain.value = i === 4 ? 0.32 : 0.48;
+      const a = ctx.createOscillator();
+      const b = ctx.createOscillator();
+      a.type = i % 2 ? 'triangle' : 'sine';
+      b.type = 'sine';
+      a.frequency.value = freq;
+      b.frequency.value = freq;
+      a.detune.value = i % 2 ? 5 : -5;
+      b.detune.value = i % 2 ? -3 : 3;
+      a.connect(noteGain);
+      b.connect(noteGain);
+      noteGain.connect(panner);
+      panner.connect(pad);
+      const stop = end + 2.3;
+      a.start(t); b.start(t);
+      a.stop(stop); b.stop(stop);
+    });
+
+    const sub = ctx.createOscillator();
+    sub.type = 'sine';
+    sub.frequency.value = chord.bass;
+    const subGain = ctx.createGain();
+    subGain.gain.setValueAtTime(0, t);
+    subGain.gain.linearRampToValueAtTime(0.045, t + 2.4);
+    subGain.gain.linearRampToValueAtTime(0.0001, end + 1.4);
+    sub.connect(subGain);
+    subGain.connect(music.bus);
+    sub.start(t);
+    sub.stop(end + 1.5);
+
+    const arp = [0, 2, 4, 1];
+    arp.forEach((step, k) => {
+      pluck(chord.notes[step] * 2, t + (k * 2 + 1) * MUSIC_BEAT, k === 3 ? 0.018 : 0.028);
+    });
+
+    if (index % 2 === 0) {
+      pluck(chord.notes[4] * 4, t + 4.5 * MUSIC_BEAT, 0.010, 3.6);
+    }
+  }
+
+  function pluck(freq, t, level = 0.025, decay = 2.5) {
+    const ctx = music.ctx;
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq * 1.004, t);
+    osc.frequency.exponentialRampToValueAtTime(freq, t + 0.12);
+    const body = ctx.createOscillator();
+    body.type = 'triangle';
+    body.frequency.value = freq;
+    body.detune.value = 4;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.linearRampToValueAtTime(level, t + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+    const bodyGain = ctx.createGain();
+    bodyGain.gain.value = 0.28;
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = (Math.random() * 2 - 1) * 0.38;
+    osc.connect(gain);
+    body.connect(bodyGain);
+    bodyGain.connect(gain);
+    gain.connect(panner);
+    panner.connect(music.bus);
+    osc.start(t); body.start(t);
+    osc.stop(t + decay + 0.1); body.stop(t + decay + 0.1);
+  }
+
+  function syncMusic() {
+    if (!music.ctx || !music.master) return;
+    const now = music.ctx.currentTime;
+    const target = music.enabled && state.playing ? music.volume : 0;
+    music.master.gain.cancelScheduledValues(now);
+    music.master.gain.setTargetAtTime(target, now, target ? 1.15 : 0.4);
+  }
+
+  function toggleMusic() {
+    // First click on the speaker starts the audio engine instead of muting it.
+    if (!music.ctx && music.enabled) {
+      ensureMusic();
+      musicBtn.setAttribute('aria-pressed', 'true');
+      musicBtn.classList.remove('is-muted');
+      showToast('موسیقی روشن است');
+      return;
+    }
+    music.enabled = !music.enabled;
+    musicBtn.classList.toggle('is-muted', !music.enabled);
+    musicBtn.setAttribute('aria-pressed', String(music.enabled));
+    musicBtn.setAttribute('aria-label', music.enabled ? 'خاموش کردن موسیقی' : 'روشن کردن موسیقی');
+    if (music.enabled) ensureMusic();
+    syncMusic();
+    showToast(music.enabled ? 'موسیقی روشن شد' : 'موسیقی خاموش شد');
+  }
+
+  function unlockMusic(e) {
+    if (e && e.target && e.target.closest && e.target.closest('#musicBtn')) return;
+    if (music.enabled) {
+      ensureMusic();
+      toastEl.classList.remove('show');
+    }
+  }
+  ['pointerdown', 'keydown', 'touchstart'].forEach(ev => {
+    window.addEventListener(ev, unlockMusic, { once: true, capture: true, passive: true });
+  });
+
   /* ---------- boot ---------- */
   const params = new URLSearchParams(location.search);
   const hash = (location.hash || '').match(/t=([\d.]+)/);
@@ -2121,7 +2400,12 @@ svg{display:block}
   updateTime();
   setPaused(startPaused, { silent: true });
   if (params.get('notes') === '1') toggleNotes(true);
-  if (!startPaused) wake();
+  if (!startPaused) {
+    wake();
+    setTimeout(() => {
+      if (!music.ctx) showToast('برای شنیدن موسیقی، یک بار روی صفحه کلیک کنید');
+    }, 1800);
+  }
   drawAmbient(state.t);
   requestAnimationFrame((now) => { state.last = now; tick(now); });
 
@@ -2137,8 +2421,26 @@ svg{display:block}
   window.__seek = (sec) => { seek(sec); drawAmbient(state.t); };
   window.__play = () => play();
   window.__pause = () => pause();
-  window.__state = () => ({ t: state.t, playing: state.playing, current: state.current, duration: DURATION });
+  window.__state = () => ({
+    t: state.t,
+    playing: state.playing,
+    current: state.current,
+    duration: DURATION,
+    music: music.ctx ? music.ctx.state : 'not-started',
+    musicEnabled: music.enabled
+  });
   window.__snap = () => { renderSeek(); drawAmbient(state.t); };
+  window.__music = {
+    ensure: ensureMusic,
+    toggle: toggleMusic,
+    state: () => ({
+      state: music.ctx ? music.ctx.state : 'not-started',
+      enabled: music.enabled,
+      scheduled: !!music.scheduler,
+      gain: music.master ? music.master.gain.value : 0,
+      chord: music.chord
+    })
+  };
 })();
 
 </script>
